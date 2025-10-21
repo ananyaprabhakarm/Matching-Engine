@@ -1,6 +1,9 @@
-from enum import Enum
+# engine/order.py
+from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 import uuid
+from enum import Enum
 
 class OrderType(str, Enum):
     MARKET = "market"
@@ -12,20 +15,23 @@ class OrderSide(str, Enum):
     BUY = "buy"
     SELL = "sell"
 
+@dataclass
 class Order:
-    def __init__(self, symbol: str, order_type: OrderType, side: OrderSide, quantity: float, price: float = None):
-        self.id = str(uuid.uuid4())
-        self.symbol = symbol
-        self.order_type = order_type
-        self.side = side
-        self.quantity = quantity
-        self.price = price
-        self.timestamp = datetime.utcnow()
-        self.filled = 0
+    symbol: str
+    order_type: OrderType
+    side: OrderSide
+    quantity: Decimal
+    price: Decimal | None = None  # None for market orders
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+    filled: Decimal = field(default_factory=lambda: Decimal("0"))
 
     @property
-    def remaining(self):
+    def remaining(self) -> Decimal:
         return self.quantity - self.filled
 
     def __repr__(self):
-        return f"<Order {self.id} {self.side} {self.quantity}@{self.price} remaining={self.remaining}>"
+        return (
+            f"Order(id={self.id[:8]}, {self.side} {self.quantity}@{self.price}, "
+            f"remaining={self.remaining}, ts={self.timestamp.isoformat()})"
+        )
