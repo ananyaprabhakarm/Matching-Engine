@@ -8,7 +8,7 @@ from enum import Enum
 class OrderType(str, Enum):
     MARKET = "market"
     LIMIT = "limit"
-    IOC = "ioc"
+    IOC = "ioc" #
     FOK = "fok"
 
 class OrderSide(str, Enum):

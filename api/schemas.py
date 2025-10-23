@@ -18,7 +18,8 @@ class OrderRequest(BaseModel):
         try:
             return Decimal(str(v))
         except (InvalidOperation, TypeError):
-            raise ValueError("quantity must be a decimal")
+            raise ValueError("error hai bhai")
+
 
     @validator("price", pre=True, always=True)
     def parse_price(cls, v, values):
