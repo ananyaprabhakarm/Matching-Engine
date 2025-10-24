@@ -145,7 +145,7 @@ async def websocket_endpoint(ws: WebSocket):
                 await safe_send(ws, json.dumps({"error": "invalid subscribe message", "detail": str(e)}))
                 continue
 
-            if msg.action == "subscribe":
+            if msg.action == 'subscribe':
                 await register_subscription(ws, msg.feed, msg.symbol)
                 # on subscribe, send immediate snapshot so client has state
                 book = engine.get_book(msg.symbol)
