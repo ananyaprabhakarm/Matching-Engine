@@ -3,16 +3,41 @@ from engine.order_book import OrderBook
 from engine.order import Order, OrderType, OrderSide
 from engine.trade import Trade
 from typing import List, Tuple
+from engine.persistence import load_snapshot, save_snapshot
+import asyncio
 
 # set decimal precision (adjust as needed)
 getcontext().prec = 18
 
 class MatchingEngine:
-    def __init__(self):
+    def __init__(self, persist_interval_seconds: int = 5):
         # symbol -> OrderBook
         self.order_books = {}
         # store trades for audit
         self.trades: List[Trade] = []
+        data = load_snapshot()
+        if data:
+            self.order_books, self.trades = data.get("order_books",{}),data.get("trades",[])
+        self._persist_interval = persist_interval_seconds
+        self._persist_task = None
+
+    async def start_persistence_task(self):
+        if self._persist_task:
+            return
+        self._persist_task = asyncio.create_task(self._persist_loop())
+
+    async def _persist_loop(self):
+        while True:
+            await asyncio.sleep(self._persist_interval)
+            try:
+                save_snapshot({"order_books": self.order_books, "trades": self.trades})
+            except Exception:
+                # don't crash engine
+                pass
+
+    def save_state_now(self):
+        save_snapshot({"order_books": self.order_books, "trades": self.trades})    
+
 
     def get_book(self, symbol: str) -> OrderBook:
         if symbol not in self.order_books:
