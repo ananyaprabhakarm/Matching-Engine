@@ -1,4 +1,3 @@
-# api/server.py
 import asyncio
 import json
 from typing import Dict, Set, Tuple
@@ -176,8 +175,5 @@ async def websocket_endpoint(ws: WebSocket):
 def health():
     return {"status": "ok"}
 
-# ---------------------------
-# Run with: uvicorn api.server:app --reload
-# ---------------------------
 if __name__ == "__main__":
     uvicorn.run("api.server:app", host="127.0.0.1", port=8000, reload=True)

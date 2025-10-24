@@ -1,4 +1,3 @@
-# engine/matching_engine.py
 from decimal import Decimal, getcontext
 from engine.order_book import OrderBook
 from engine.order import Order, OrderType, OrderSide

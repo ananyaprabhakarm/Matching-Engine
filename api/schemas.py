@@ -1,4 +1,3 @@
-# api/schemas.py
 from pydantic import BaseModel, validator
 from decimal import Decimal, InvalidOperation
 from typing import Optional, Literal
