@@ -185,3 +185,21 @@ class MatchingEngine:
         # Return executed trades and current BBO snapshot
         return trades, {"bid": str(book.best_bid()) if book.best_bid() is not None else None,
                         "ask": str(book.best_ask()) if book.best_ask() is not None else None}
+    
+    def _activate_trigger_orders(self, symbol, last_trade_price: Decimal):
+        book = self.get_book(symbol)
+        activated = book.check_and_activate_triggers(last_trade_price)
+        for trig in activated:
+            # convert STOP to proper order type
+            if trig.order_type == OrderType.STOP:
+                # market order
+                new_order = Order(symbol=trig.symbol, order_type=OrderType.MARKET, side=trig.side, quantity=trig.quantity)
+                self.process_order(new_order)
+            elif trig.order_type == OrderType.STOP_LIMIT:
+                # becomes a limit order at trig.price
+                new_order = Order(symbol=trig.symbol, order_type=OrderType.LIMIT, side=trig.side, quantity=trig.quantity, price=trig.price)
+                self.process_order(new_order)
+            elif trig.order_type == OrderType.TAKE_PROFIT:
+                # treat as market on trigger (or stop-limit depending on meta)
+                new_order = Order(symbol=trig.symbol, order_type=OrderType.MARKET, side=trig.side, quantity=trig.quantity)
+                self.process_order(new_order)

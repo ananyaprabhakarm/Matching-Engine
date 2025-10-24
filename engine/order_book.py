@@ -1,7 +1,7 @@
 from collections import deque
 from decimal import Decimal
 from typing import Deque, Dict, List, Tuple
-from engine.order import Order, OrderSide
+from engine.order import Order, OrderSide, OrderType
 import bisect
 
 class OrderBook:
@@ -20,6 +20,55 @@ class OrderBook:
         # sorted price lists for efficient best price lookups
         self.bids_prices: List[Decimal] = []  # descending
         self.asks_prices: List[Decimal] = []  # ascending
+        # inside OrderBook.__init__
+        self.trigger_orders = []  # list[Order] - orders waiting for trigger
+
+    def add_trigger_order(self, order: Order):
+        self.trigger_orders.append(order)
+
+    def check_and_activate_triggers(self, last_trade_price: Decimal = None):
+        """
+        Evaluate trigger orders and return list of orders that should be activated now.
+        Activation rules:
+        - Stop-Loss SELL: trigger if last_trade_price <= stop_price
+        - Stop-Loss BUY: trigger if last_trade_price >= stop_price (buy stop triggers above)
+        - Take-Profit SELL: trigger if last_trade_price >= stop_price
+        - etc...
+        On activation, remove from trigger_orders and return list of activated orders.
+        """
+        activated = []
+        remaining = []
+        for o in self.trigger_orders:
+            triggered = False
+            sp = o.stop_price
+            if sp is None:
+                continue
+            if o.order_type == OrderType.STOP:
+                # STOP -> market-on-trigger
+                if o.side == OrderSide.SELL and last_trade_price is not None and last_trade_price <= sp:
+                    triggered = True
+                if o.side == OrderSide.BUY and last_trade_price is not None and last_trade_price >= sp:
+                    triggered = True
+            elif o.order_type == OrderType.STOP_LIMIT:
+                # STOP_LIMIT -> becomes LIMIT at `price` when triggered
+                if o.side == OrderSide.SELL and last_trade_price is not None and last_trade_price <= sp:
+                    triggered = True
+                if o.side == OrderSide.BUY and last_trade_price is not None and last_trade_price >= sp:
+                    triggered = True
+            elif o.order_type == OrderType.TAKE_PROFIT:
+                # take profit: SELL take profit triggers when price >= sp
+                if o.side == OrderSide.SELL and last_trade_price is not None and last_trade_price >= sp:
+                    triggered = True
+                if o.side == OrderSide.BUY and last_trade_price is not None and last_trade_price <= sp:
+                    triggered = True
+
+            if triggered:
+                activated.append(o)
+            else:
+                remaining.append(o)
+        self.trigger_orders = remaining
+        return activated
+
 
     # -------------------------
     # helpers for price lists
