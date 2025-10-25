@@ -180,7 +180,7 @@ git clone https://github.com/yourusername/matching-engine.git
 cd matching-engine
 
 # Install dependencies
-pip install fastapi uvicorn
+pip install -r requirements.txt
 
 # Run the server
 uvicorn main:app --reload
