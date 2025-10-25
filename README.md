@@ -222,3 +222,7 @@ Using async APIs for bulk order ingestion
 Running on a production ASGI server like uvicorn --workers 4
 
 Optimizing data structures (e.g., heaps or SortedDicts)
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
