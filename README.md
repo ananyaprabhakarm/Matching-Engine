@@ -38,7 +38,7 @@ This project demonstrates how a basic exchange engine works — matching buy/sel
 ---
 
 ### Basic Architecture Diagram
-
+```
  ┌──────────────────────────────┐
  │          Clients             │
  │ (Traders / Bots / Systems)   │
@@ -59,9 +59,7 @@ This project demonstrates how a basic exchange engine works — matching buy/sel
        │  - Trade Logic  │
        └─────────────────┘
 
-
----
-
+```
 ## 🧩 Data Structures
 
 | Structure | Purpose |
@@ -107,7 +105,7 @@ This project demonstrates how a basic exchange engine works — matching buy/sel
     "taker_fee_rate": 0.002
   }
 }
-
+```
 ## 💸 Maker-Taker Fee Model
 
 ### Defined in config.py:
@@ -125,6 +123,7 @@ Both fees are automatically included in each trade execution report.
 POST /order
 
 Request Example:
+```json
 {
   "symbol": "BTC-USDT",
   "order_type": "limit",
@@ -132,7 +131,9 @@ Request Example:
   "quantity": "0.5",
   "price": "65000"
 }
+```
 Response Example:
+```json
 {
   "status": "accepted",
   "order_id": "6491a6cf-c1d8-4044-9da2-ef673bd9cae0",
@@ -142,7 +143,7 @@ Response Example:
     "ask": null
   }
 }
-
+```
 ### 2. WebSocket Trade Feed
 
 Endpoint: ws://127.0.0.1:8000/ws/trades
@@ -150,6 +151,7 @@ Endpoint: ws://127.0.0.1:8000/ws/trades
 Clients receive updates on every executed trade in real time.
 
 Example message:
+```json
 {
   "symbol": "BTC-USDT",
   "price": 65000,
@@ -160,7 +162,7 @@ Example message:
     "taker_fee": 65.0
   }
 }
-
+```
 ## 🧰 Tech Stack
 
 Python 3.10+
@@ -172,7 +174,7 @@ Uvicorn (ASGI server)
 Collections / Decimal / UUID (for precise order handling)
 
 ## 🧱 Running the Project
-
+```
 # Clone repo
 git clone https://github.com/yourusername/matching-engine.git
 cd matching-engine
@@ -182,7 +184,7 @@ pip install fastapi uvicorn
 
 # Run the server
 uvicorn main:app --reload
-
+```
 Then open:
 ➡️ http://127.0.0.1:8000/docs to view API documentation.
 
@@ -193,10 +195,11 @@ POST request to /order for creating buy/sell orders.
 WebSocket connect to ws://127.0.0.1:8000/ws/trades to see trade feed live.
 
 Example curl command:
+```
 curl -X POST http://127.0.0.1:8000/order \
   -H "Content-Type: application/json" \
   -d '{"symbol": "BTC-USDT", "order_type": "limit", "side": "buy", "quantity": "1", "price": "65000"}'
-
+```
 ## 🧭 Design Choices & Trade-offs
 | Area                              | Decision                         | Reason                      |
 | --------------------------------- | -------------------------------- | --------------------------- |
