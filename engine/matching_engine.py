@@ -4,6 +4,7 @@ from engine.order import Order, OrderType, OrderSide
 from engine.trade import Trade
 from typing import List, Tuple
 from engine.persistence import load_snapshot, save_snapshot
+from utils.config import MAKER_FEE_RATE, TAKER_FEE_RATE
 import asyncio
 
 # set decimal precision (adjust as needed)
@@ -48,6 +49,8 @@ class MatchingEngine:
         book = self.get_book(symbol)
         return {"bid": str(book.best_bid()) if book.best_bid() is not None else None,
                 "ask": str(book.best_ask()) if book.best_ask() is not None else None}
+    
+    
 
     def process_order(self, order: Order) -> Tuple[List[Trade], dict]:
         """
@@ -135,6 +138,10 @@ class MatchingEngine:
                     taker_order_id=order.id,
                     aggressor_side=aggressor_side
                 )
+                trade_value = exec_price * exec_qty
+                trade.maker_fee = trade_value * Decimal(MAKER_FEE_RATE)
+                trade.taker_fee = trade_value * Decimal(TAKER_FEE_RATE)
+
                 trades.append(trade)
                 self.trades.append(trade)
 

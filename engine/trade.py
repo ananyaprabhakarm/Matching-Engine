@@ -15,6 +15,8 @@ class Trade:
     taker_fee: Decimal = field(default_factory=lambda: Decimal("0"))
     timestamp: datetime = field(default_factory=datetime.utcnow)
     trade_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    maker_fee: None
+    taker_fee: None
 
     def to_dict(self):
         return {
@@ -26,6 +28,6 @@ class Trade:
             "aggressor_side": self.aggressor_side,
             "maker_order_id": self.maker_order_id,
             "taker_order_id": self.taker_order_id,
-            "maker_fee": str(self.maker_fee),
-            "taker_fee": str(self.taker_fee),
+            "maker_fee": str(self.maker_fee) if self.maker_fee else None,
+            "taker_fee": str(self.taker_fee) if self.take_fee else None,
         }
