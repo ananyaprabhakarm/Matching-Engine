@@ -200,15 +200,6 @@ curl -X POST http://127.0.0.1:8000/order \
   -H "Content-Type: application/json" \
   -d '{"symbol": "BTC-USDT", "order_type": "limit", "side": "buy", "quantity": "1", "price": "65000"}'
 ```
-## 🧭 Design Choices & Trade-offs
-| Area                              | Decision                         | Reason                      |
-| --------------------------------- | -------------------------------- | --------------------------- |
-| **In-memory order book**          | No external DB                   | Simpler, faster for testing |
-| **FIFO queues at price levels**   | Ensures price-time fairness      |                             |
-| **FastAPI**                       | Lightweight + async support      |                             |
-| **Fee calculation inline**        | Keeps trades atomic              |                             |
-| **No persistent storage/logging** | Focus on performance and clarity |                             |
-
 ## 📈 Future Improvements
 
 Add persistent storage (e.g., Redis/PostgreSQL)
