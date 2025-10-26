@@ -131,8 +131,9 @@ class MatchingEngine:
                 # Create trade
                 aggressor_side = order.side.value if isinstance(order.side, OrderSide) else order.side
                 trade_value = exec_price * exec_qty
-                trade.maker_fee = trade_value * Decimal(MAKER_FEE_RATE)
-                trade.taker_fee = trade_value * Decimal(TAKER_FEE_RATE)
+                maker_fee = MAKER_FEE_RATE
+                taker_fee = TAKER_FEE_RATE
+
                 trade = Trade(
                     symbol=order.symbol,
                     price=exec_price,
@@ -140,10 +141,14 @@ class MatchingEngine:
                     maker_order_id=resting_order.id,
                     taker_order_id=order.id,
                     aggressor_side=aggressor_side,
-                    maker_fee=trade.maker_fee,
-                    taker_fee=trade.taker_fee
+                    maker_fee=maker_fee,
+                    taker_fee=taker_fee
                 )
+
                 
+                
+                trade.maker_fee = trade_value * Decimal(MAKER_FEE_RATE)
+                trade.taker_fee = trade_value * Decimal(TAKER_FEE_RATE)
 
                 trades.append(trade)
                 self.trades.append(trade)
