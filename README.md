@@ -179,8 +179,12 @@ Collections / Decimal / UUID (for precise order handling)
 git clone https://github.com/yourusername/matching-engine.git
 cd matching-engine
 
+# Create Virual Enviornment
+python -m venv .venv
+source .venv/bin/activate
+
 # Install dependencies
-pip install fastapi uvicorn
+pip install -r requirements.txt
 
 # Run the server
 uvicorn main:app --reload
