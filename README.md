@@ -187,7 +187,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Run the server
-uvicorn main:app --reload
+uvicorn api.server:app --workers 4 --host 127.0.0.1 --port 8000
 ```
 Then open:
 ➡️ http://127.0.0.1:8000/docs to view API documentation.
