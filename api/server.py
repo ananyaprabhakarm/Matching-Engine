@@ -1,8 +1,10 @@
 import asyncio
 import json
+from pathlib import Path
 from typing import Dict, Set, Tuple
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from api.schemas import OrderRequest, WSSubscribe
@@ -174,6 +176,16 @@ async def websocket_endpoint(ws: WebSocket):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+# ---------------------------
+# Web dashboard (static demo UI)
+# ---------------------------
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    return FileResponse(WEB_DIR / "index.html")
 
 if __name__ == "__main__":
     uvicorn.run("api.server:app", host="127.0.0.1", port=8000, reload=True)

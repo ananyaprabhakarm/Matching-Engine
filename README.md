@@ -190,7 +190,12 @@ pip install -r requirements.txt
 uvicorn api.server:app --workers 4 --host 127.0.0.1 --port 8000
 ```
 Then open:
+➡️ http://127.0.0.1:8000/ for the live trading dashboard (order entry, live order book, BBO, trade tape)
 ➡️ http://127.0.0.1:8000/docs to view API documentation.
+
+## 🖥️ Live Dashboard
+
+A single-page dashboard is served directly by the API at `/` (see [web/](web/)) — no separate frontend build or server needed. It connects to `/order` and `/ws` in real time so you can place orders and watch the book, BBO, and trade tape update live, straight from the actual matching engine.
 
 ## 🧪 Testing with Postman
 
