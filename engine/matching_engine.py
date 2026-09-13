@@ -90,10 +90,6 @@ class MatchingEngine:
             total_avail = Decimal("0")
             # sum over all marketable price levels
             for p in list(counter_prices):
-                if not price_level_marketable(p):
-                    break_if = False
-                    # for asks (ascending) if p > order.price then not marketable (and further prices won't be marketable)
-                    # for bids (descending) if p < order.price then not marketable
                 if price_level_marketable(p):
                     total_avail += sum(o.remaining for o in counter_map.get(p, []))
             if total_avail < order.remaining:
@@ -131,8 +127,6 @@ class MatchingEngine:
                 # Create trade
                 aggressor_side = order.side.value if isinstance(order.side, OrderSide) else order.side
                 trade_value = exec_price * exec_qty
-                maker_fee = MAKER_FEE_RATE
-                taker_fee = TAKER_FEE_RATE
 
                 trade = Trade(
                     symbol=order.symbol,
@@ -141,14 +135,9 @@ class MatchingEngine:
                     maker_order_id=resting_order.id,
                     taker_order_id=order.id,
                     aggressor_side=aggressor_side,
-                    maker_fee=maker_fee,
-                    taker_fee=taker_fee
+                    maker_fee=trade_value * MAKER_FEE_RATE,
+                    taker_fee=trade_value * TAKER_FEE_RATE
                 )
-
-                
-                
-                trade.maker_fee = trade_value * Decimal(MAKER_FEE_RATE)
-                trade.taker_fee = trade_value * Decimal(TAKER_FEE_RATE)
 
                 trades.append(trade)
                 self.trades.append(trade)

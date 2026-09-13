@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Matching Engine — Live Demo</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot"></span>
+      <h1>Matching Engine</h1>
+      <span class="brand-sub">live demo</span>
+    </div>
+    <div class="topbar-right">
+      <label class="symbol-select">
+        Symbol
+        <select id="symbol">
+          <option value="BTC-USDT">BTC-USDT</option>
+          <option value="ETH-USDT">ETH-USDT</option>
+          <option value="SOL-USDT">SOL-USDT</option>
+        </select>
+      </label>
+      <div id="conn-status" class="conn-status conn-connecting">
+        <span class="dot"></span> connecting…
+      </div>
+    </div>
+  </header>
+
+  <section class="bbo-strip">
+    <div class="bbo-cell">
+      <span class="bbo-label">Best Bid</span>
+      <span id="bbo-bid" class="bbo-value bid">—</span>
+    </div>
+    <div class="bbo-cell">
+      <span class="bbo-label">Spread</span>
+      <span id="bbo-spread" class="bbo-value">—</span>
+    </div>
+    <div class="bbo-cell">
+      <span class="bbo-label">Best Ask</span>
+      <span id="bbo-ask" class="bbo-value ask">—</span>
+    </div>
+  </section>
+
+  <main class="layout">
+    <section class="panel order-panel">
+      <h2>Submit Order</h2>
+      <form id="order-form">
+        <div class="side-toggle">
+          <button type="button" class="side-btn buy active" data-side="buy">Buy</button>
+          <button type="button" class="side-btn sell" data-side="sell">Sell</button>
+        </div>
+
+        <label>
+          Order Type
+          <select id="order_type">
+            <option value="limit">Limit</option>
+            <option value="market">Market</option>
+            <option value="ioc">IOC</option>
+            <option value="fok">FOK</option>
+          </select>
+        </label>
+
+        <label>
+          Quantity
+          <input id="quantity" type="text" inputmode="decimal" placeholder="0.5" required />
+        </label>
+
+        <label id="price-field">
+          Price
+          <input id="price" type="text" inputmode="decimal" placeholder="65000" />
+        </label>
+
+        <button type="submit" id="submit-btn" class="submit-btn buy">Place Buy Order</button>
+      </form>
+      <div id="order-feedback" class="feedback"></div>
+
+      <h2 class="trades-heading">Trade Tape</h2>
+      <div id="trade-tape" class="trade-tape">
+        <div class="empty-hint">Trades will appear here as they execute.</div>
+      </div>
+    </section>
+
+    <section class="panel book-panel">
+      <h2>Order Book — Top 10</h2>
+      <div class="book-grid">
+        <div class="book-col">
+          <div class="book-col-header bid">Bids</div>
+          <div class="book-head-row"><span>Price</span><span>Qty</span></div>
+          <div id="bids-body" class="book-body"></div>
+        </div>
+        <div class="book-col">
+          <div class="book-col-header ask">Asks</div>
+          <div class="book-head-row"><span>Price</span><span>Qty</span></div>
+          <div id="asks-body" class="book-body"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Price-time priority matching &middot; maker-taker fees &middot; live via WebSocket
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
