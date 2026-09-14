@@ -22,6 +22,8 @@ class OrderBook:
         self.asks_prices: List[Decimal] = []  # ascending
         # inside OrderBook.__init__
         self.trigger_orders = []  # list[Order] - orders waiting for trigger
+        # order_id -> Order, for O(1) lookup on cancellation
+        self.orders_by_id: Dict[str, Order] = {}
 
     def add_trigger_order(self, order: Order):
         self.trigger_orders.append(order)
@@ -111,6 +113,37 @@ class OrderBook:
                 pm[order.price] = deque()
                 self._insert_ask_price(order.price)
             pm[order.price].append(order)
+        self.orders_by_id[order.id] = order
+
+    # -------------------------
+    # cancellation
+    # -------------------------
+    def cancel_order(self, order_id: str, trader_id: str) -> str:
+        """
+        Attempt to cancel a resting order. Returns one of:
+          "ok", "not_found", "forbidden", "already_filled"
+        """
+        order = self.orders_by_id.get(order_id)
+        if order is None:
+            return "not_found"
+        if order.trader_id != trader_id:
+            return "forbidden"
+        if order.remaining <= 0:
+            return "already_filled"
+
+        pm = self.bids_map if order.side == OrderSide.BUY else self.asks_map
+        queue = pm.get(order.price)
+        if queue is not None and order in queue:
+            queue.remove(order)
+            if not queue:
+                del pm[order.price]
+                if order.side == OrderSide.BUY:
+                    self._remove_bid_price(order.price)
+                else:
+                    self._remove_ask_price(order.price)
+
+        del self.orders_by_id[order_id]
+        return "ok"
 
     def remove_empty_price_level(self, side: OrderSide, price):
         if side == OrderSide.BUY:
@@ -148,14 +181,15 @@ class OrderBook:
     # -------------------------
     # helper to compute available quantities up to a limit price
     # -------------------------
-    def available_qty_on_side_up_to_price(self, side: OrderSide, limit_price=None) -> Decimal:
+    def available_qty_on_side_up_to_price(self, side: OrderSide, limit_price=None, exclude_trader_id=None) -> Decimal:
         """
         Calculate aggregate available qty on the given side that is marketable
         relative to a given limit price.
         For a taker buy with limit_price P, available asks priced <= P are considered.
         For market taker (limit_price is None) all opposite side levels count.
+        `exclude_trader_id`, when set, excludes that trader's own resting orders
+        from the total (used for self-trade-prevention-aware FOK checks).
         """
-        from decimal import Decimal
         total = Decimal("0")
         if side == OrderSide.BUY:
             # count bids (we usually use this if incoming is sell)
@@ -165,7 +199,7 @@ class OrderBook:
             for p in price_list:
                 if limit_price is not None and p > limit_price:
                     continue
-                total += sum(o.remaining for o in pm.get(p, []))
+                total += sum(o.remaining for o in pm.get(p, []) if o.trader_id != exclude_trader_id)
         else:
             # count asks (incoming buy)
             price_list = self.asks_prices
@@ -173,5 +207,5 @@ class OrderBook:
             for p in price_list:
                 if limit_price is not None and p < limit_price:
                     continue
-                total += sum(o.remaining for o in pm.get(p, []))
+                total += sum(o.remaining for o in pm.get(p, []) if o.trader_id != exclude_trader_id)
         return total

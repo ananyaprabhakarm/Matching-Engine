@@ -10,7 +10,9 @@ class Trade:
     quantity: Decimal
     maker_order_id: str
     taker_order_id: str
-    aggressor_side: str             
+    aggressor_side: str
+    maker_trader_id: str = ""
+    taker_trader_id: str = ""
     maker_fee: Decimal = field(default_factory=lambda: Decimal("0"))
     taker_fee: Decimal = field(default_factory=lambda: Decimal("0"))
     timestamp: datetime = field(default_factory=datetime.utcnow)
@@ -26,6 +28,8 @@ class Trade:
             "aggressor_side": self.aggressor_side,
             "maker_order_id": self.maker_order_id,
             "taker_order_id": self.taker_order_id,
+            "maker_trader_id": self.maker_trader_id,
+            "taker_trader_id": self.taker_trader_id,
             "maker_fee": str(self.maker_fee) if self.maker_fee else None,
             "taker_fee": str(self.taker_fee) if self.taker_fee else None,
         }
