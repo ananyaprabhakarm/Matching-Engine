@@ -24,6 +24,7 @@ class Order:
     order_type: OrderType
     side: OrderSide
     quantity: Decimal
+    trader_id: str
     price: Optional[Decimal] = None   # limit price for LIMIT or STOP_LIMIT
     stop_price: Optional[Decimal] = None  # trigger price for stop orders
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -37,4 +38,4 @@ class Order:
         return self.quantity - self.filled
 
     def __repr__(self):
-        return f"<Order {self.id[:8]} {self.side} {self.quantity}@{self.price} stop={self.stop_price} remaining={self.remaining}>"
+        return f"<Order {self.id[:8]} {self.trader_id} {self.side} {self.quantity}@{self.price} stop={self.stop_price} remaining={self.remaining}>"

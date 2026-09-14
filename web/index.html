@@ -16,6 +16,10 @@
     </div>
     <div class="topbar-right">
       <label class="symbol-select">
+        Trader
+        <input id="trader-id" type="text" placeholder="alice" maxlength="32" />
+      </label>
+      <label class="symbol-select">
         Symbol
         <select id="symbol">
           <option value="BTC-USDT">BTC-USDT</option>
@@ -60,6 +64,9 @@
             <option value="market">Market</option>
             <option value="ioc">IOC</option>
             <option value="fok">FOK</option>
+            <option value="stop">Stop</option>
+            <option value="stop_limit">Stop-Limit</option>
+            <option value="take_profit">Take-Profit</option>
           </select>
         </label>
 
@@ -73,9 +80,19 @@
           <input id="price" type="text" inputmode="decimal" placeholder="65000" />
         </label>
 
+        <label id="stop-price-field">
+          Stop / Trigger Price
+          <input id="stop_price" type="text" inputmode="decimal" placeholder="64000" />
+        </label>
+
         <button type="submit" id="submit-btn" class="submit-btn buy">Place Buy Order</button>
       </form>
       <div id="order-feedback" class="feedback"></div>
+
+      <h2 class="trades-heading">My Open Orders</h2>
+      <div id="open-orders" class="open-orders">
+        <div class="empty-hint">No open orders.</div>
+      </div>
 
       <h2 class="trades-heading">Trade Tape</h2>
       <div id="trade-tape" class="trade-tape">

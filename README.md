@@ -13,7 +13,11 @@ This project demonstrates how a basic exchange engine works — matching buy/sel
   - MARKET (match immediately or cancel)
   - IOC (Immediate or Cancel)
   - FOK (Fill or Kill)
+  - STOP / STOP_LIMIT / TAKE_PROFIT (rest as pending triggers, activate on a crossing trade)
 - **Symbols:** Supports multiple trading pairs (e.g., BTC-USDT)
+- **Trader Identity:** Every order carries a `trader_id` (a plain client-supplied string, not a login system) - enough to support cancellation and self-trade prevention
+- **Order Cancellation:** Cancel your own resting orders; other traders' orders can't be discovered or cancelled
+- **Self-Trade Prevention:** An order never matches against its own trader's resting orders - it skips them and matches everyone else at that price level instead
 - **Maker-Taker Fee Model:**  
   - Maker: 0.1%  
   - Taker: 0.2%
@@ -129,9 +133,12 @@ Request Example:
   "order_type": "limit",
   "side": "buy",
   "quantity": "0.5",
-  "price": "65000"
+  "price": "65000",
+  "trader_id": "alice"
 }
 ```
+For `stop` / `stop_limit` / `take_profit`, also include `stop_price` (the trigger price); `stop_limit` additionally needs `price` (the limit price it converts to once triggered).
+
 Response Example:
 ```json
 {
@@ -141,10 +148,30 @@ Response Example:
   "bbo": {
     "bid": "65000",
     "ask": null
-  }
+  },
+  "self_trade_prevented": false
 }
 ```
-### 2. WebSocket Trade Feed
+
+### 2. Cancel Order
+
+DELETE /order/{order_id}?trader_id=alice
+
+Cancels a resting order. Returns 404 if the order doesn't exist *or* belongs to a different trader (the two aren't distinguished, so you can't probe for other traders' order IDs), and 400 if the order is already fully filled.
+
+### 3. Order Book Snapshot
+
+GET /orderbook/{symbol}
+
+Same shape as the WebSocket `l2_update` payload (top 10 bids/asks + BBO), for clients that don't want to hold a socket open just to check the book once.
+
+### 4. A Trader's Open Orders
+
+GET /orders/{trader_id}
+
+Lists that trader's currently-resting orders (used by the dashboard to show cancel buttons next to your own open orders).
+
+### 5. WebSocket Trade Feed
 
 Endpoint: ws://127.0.0.1:8000/ws/trades
 
@@ -186,8 +213,8 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the server
-uvicorn api.server:app --workers 4 --host 127.0.0.1 --port 8000
+# Run the server (single worker only - see "Scaling this" below)
+uvicorn api.server:app --host 127.0.0.1 --port 8000
 ```
 Then open:
 ➡️ http://127.0.0.1:8000/ for the live trading dashboard (order entry, live order book, BBO, trade tape)
@@ -211,24 +238,38 @@ curl -X POST http://127.0.0.1:8000/order \
 ```
 ## 📈 Future Improvements
 
-Add persistent storage (e.g., Redis/PostgreSQL)
+Add persistent storage as an append-only event log (current pickle-snapshot persistence exists but isn't wired into the server lifecycle yet)
 
-Add order cancellation and modification support
+Add order modification support (cancellation already exists)
 
 Add proper logging and audit trails
 
 Add performance benchmarking
 
-Expose /orderbook snapshot endpoint
+Swap the price-level `list` + `bisect` structure for something with better insert/remove complexity at scale (e.g. `sortedcontainers.SortedList`) - the current approach is correct, just not optimal under heavy order-book churn
+
+Real authentication (today `trader_id` is just a client-supplied string, not a login system - fine for a demo, not for production)
+
+## ⚖️ Scaling This
+
+This engine is intentionally a **single process** right now: `MatchingEngine` and every `OrderBook` are plain in-memory Python objects with no external shared store behind them. That's why the run command above does *not* use `--workers`  - each `uvicorn` worker is a separate process with its own private copy of the engine, so an order placed against worker 1 would be completely invisible to worker 2's order book. That's a correctness bug, not a performance tradeoff.
+
+Within a single process, this already handles real concurrency well: FastAPI/`asyncio` serve many connections concurrently, and a per-symbol `asyncio.Lock` serializes only the orders for the *same* symbol, so BTC-USDT and ETH-USDT orders never block each other.
+
+To actually scale beyond one process, the real options are:
+- **Shard by symbol** across multiple processes, with a lightweight router in front that sends each symbol's orders to its own dedicated process.
+- **Move the shared state out of process** entirely (e.g. into Redis or a dedicated matching microservice) so multiple API workers can all submit to the same source of truth.
+
+Either is a legitimate next step - just not something you get for free by adding `--workers`.
 
 ## 🧪 Performance Note
 
-Currently, the system is in-memory and single-threaded — you can expect hundreds of orders/sec easily.
-Performance can be scaled to 1000+ orders/sec by:
+Currently, the system is in-memory and single-process — you can expect hundreds of orders/sec easily within that one process.
+Performance can be scaled further by:
 
 Using async APIs for bulk order ingestion
 
-Running on a production ASGI server like uvicorn --workers 4
+Sharding by symbol or moving shared state to Redis (see "Scaling This" above) - not by adding uvicorn workers, which breaks correctness for this architecture
 
 Optimizing data structures (e.g., heaps or SortedDicts)
 

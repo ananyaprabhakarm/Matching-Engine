@@ -1,5 +1,6 @@
 (() => {
   const symbolSelect = document.getElementById("symbol");
+  const traderIdInput = document.getElementById("trader-id");
   const connStatus = document.getElementById("conn-status");
   const bboBid = document.getElementById("bbo-bid");
   const bboAsk = document.getElementById("bbo-ask");
@@ -7,20 +8,40 @@
   const bidsBody = document.getElementById("bids-body");
   const asksBody = document.getElementById("asks-body");
   const tradeTape = document.getElementById("trade-tape");
+  const openOrdersEl = document.getElementById("open-orders");
   const orderForm = document.getElementById("order-form");
   const feedback = document.getElementById("order-feedback");
   const submitBtn = document.getElementById("submit-btn");
   const priceField = document.getElementById("price-field");
   const priceInput = document.getElementById("price");
+  const stopPriceField = document.getElementById("stop-price-field");
+  const stopPriceInput = document.getElementById("stop_price");
   const quantityInput = document.getElementById("quantity");
   const orderTypeSelect = document.getElementById("order_type");
   const sideButtons = document.querySelectorAll(".side-btn");
+
+  const PRICE_REQUIRED_TYPES = new Set(["limit", "ioc", "fok", "stop_limit"]);
+  const STOP_PRICE_REQUIRED_TYPES = new Set(["stop", "stop_limit", "take_profit"]);
 
   let currentSymbol = symbolSelect.value;
   let currentSide = "buy";
   let ws = null;
   let reconnectTimer = null;
+  let openOrdersPoll = null;
   const seenTradeIds = new Set();
+
+  // ---------------------------
+  // Trader identity (persisted per browser, not a real login)
+  // ---------------------------
+  traderIdInput.value = localStorage.getItem("matching_engine_trader_id") || "";
+  traderIdInput.addEventListener("input", () => {
+    localStorage.setItem("matching_engine_trader_id", traderIdInput.value.trim());
+    refreshOpenOrders();
+  });
+
+  function currentTraderId() {
+    return traderIdInput.value.trim();
+  }
 
   // ---------------------------
   // Order form interactions
@@ -35,16 +56,25 @@
     });
   });
 
-  function updatePriceVisibility() {
-    priceField.style.display = orderTypeSelect.value === "market" ? "none" : "flex";
+  function updateFieldVisibility() {
+    const orderType = orderTypeSelect.value;
+    priceField.style.display = PRICE_REQUIRED_TYPES.has(orderType) ? "flex" : "none";
+    stopPriceField.style.display = STOP_PRICE_REQUIRED_TYPES.has(orderType) ? "flex" : "none";
   }
-  orderTypeSelect.addEventListener("change", updatePriceVisibility);
-  updatePriceVisibility();
+  orderTypeSelect.addEventListener("change", updateFieldVisibility);
+  updateFieldVisibility();
 
   orderForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     feedback.textContent = "";
     feedback.className = "feedback";
+
+    const traderId = currentTraderId();
+    if (!traderId) {
+      feedback.textContent = "Enter a trader name first.";
+      feedback.className = "feedback err";
+      return;
+    }
 
     const orderType = orderTypeSelect.value;
     const payload = {
@@ -52,14 +82,23 @@
       order_type: orderType,
       side: currentSide,
       quantity: quantityInput.value,
+      trader_id: traderId,
     };
-    if (orderType !== "market") {
+    if (PRICE_REQUIRED_TYPES.has(orderType)) {
       if (!priceInput.value) {
         feedback.textContent = "Price is required for this order type.";
         feedback.className = "feedback err";
         return;
       }
       payload.price = priceInput.value;
+    }
+    if (STOP_PRICE_REQUIRED_TYPES.has(orderType)) {
+      if (!stopPriceInput.value) {
+        feedback.textContent = "Stop/trigger price is required for this order type.";
+        feedback.className = "feedback err";
+        return;
+      }
+      payload.stop_price = stopPriceInput.value;
     }
 
     submitBtn.disabled = true;
@@ -75,11 +114,17 @@
         feedback.className = "feedback err";
       } else {
         const fillCount = data.trades ? data.trades.length : 0;
-        feedback.textContent = `Order accepted (${data.order_id.slice(0, 8)}…) — ${fillCount} fill${fillCount === 1 ? "" : "s"}.`;
+        let msg = `Order accepted (${data.order_id.slice(0, 8)}…) — ${fillCount} fill${fillCount === 1 ? "" : "s"}.`;
+        if (data.self_trade_prevented) {
+          msg += " Self-trade prevented — skipped your own resting order(s) on the other side.";
+        }
+        feedback.textContent = msg;
         feedback.className = "feedback ok";
         orderForm.reset();
+        traderIdInput.value = traderId;
         orderTypeSelect.value = orderType;
-        updatePriceVisibility();
+        updateFieldVisibility();
+        refreshOpenOrders();
       }
     } catch (err) {
       feedback.textContent = "Could not reach the server.";
@@ -88,6 +133,70 @@
       submitBtn.disabled = false;
     }
   });
+
+  // ---------------------------
+  // Open orders panel
+  // ---------------------------
+  async function refreshOpenOrders() {
+    const traderId = currentTraderId();
+    if (!traderId) {
+      openOrdersEl.innerHTML = `<div class="empty-hint">Enter a trader name to see your open orders.</div>`;
+      return;
+    }
+    try {
+      const res = await fetch(`/orders/${encodeURIComponent(traderId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      renderOpenOrders(data.orders || []);
+    } catch {
+      // silent - this is a background refresh, don't spam the feedback line
+    }
+  }
+
+  function renderOpenOrders(orders) {
+    if (!orders.length) {
+      openOrdersEl.innerHTML = `<div class="empty-hint">No open orders.</div>`;
+      return;
+    }
+    openOrdersEl.innerHTML = orders
+      .map((o) => `
+        <div class="open-order-row" data-order-id="${o.order_id}">
+          <span class="oo-side ${o.side}">${o.side.toUpperCase()}</span>
+          <span class="oo-meta">${o.symbol} · ${o.order_type} · ${o.remaining}${o.price ? " @ " + o.price : ""}</span>
+          <button class="cancel-btn" type="button">Cancel</button>
+        </div>
+      `)
+      .join("");
+    openOrdersEl.querySelectorAll(".open-order-row").forEach((row) => {
+      const orderId = row.dataset.orderId;
+      row.querySelector(".cancel-btn").addEventListener("click", () => cancelOrder(orderId, row));
+    });
+  }
+
+  async function cancelOrder(orderId, row) {
+    const traderId = currentTraderId();
+    const btn = row.querySelector(".cancel-btn");
+    btn.disabled = true;
+    btn.textContent = "…";
+    try {
+      const res = await fetch(`/order/${orderId}?trader_id=${encodeURIComponent(traderId)}`, { method: "DELETE" });
+      if (res.ok) {
+        row.remove();
+        if (!openOrdersEl.children.length) {
+          openOrdersEl.innerHTML = `<div class="empty-hint">No open orders.</div>`;
+        }
+      } else {
+        const data = await res.json().catch(() => ({}));
+        feedback.textContent = data.detail || "Could not cancel order.";
+        feedback.className = "feedback err";
+        btn.disabled = false;
+        btn.textContent = "Cancel";
+      }
+    } catch {
+      btn.disabled = false;
+      btn.textContent = "Cancel";
+    }
+  }
 
   // ---------------------------
   // Rendering helpers
@@ -133,6 +242,9 @@
     while (tradeTape.children.length > 50) {
       tradeTape.removeChild(tradeTape.lastChild);
     }
+
+    // A trade may have filled/consumed one of the current trader's own resting orders.
+    refreshOpenOrders();
   }
 
   function resetPanels() {
@@ -216,8 +328,11 @@
 
   window.addEventListener("beforeunload", () => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (openOrdersPoll) clearInterval(openOrdersPoll);
     if (ws) ws.close();
   });
 
   connect();
+  refreshOpenOrders();
+  openOrdersPoll = setInterval(refreshOpenOrders, 3000);
 })();
