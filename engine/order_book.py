@@ -2,14 +2,28 @@ from collections import deque
 from decimal import Decimal
 from typing import Deque, Dict, List, Tuple
 from engine.order import Order, OrderSide, OrderType
-import bisect
+from sortedcontainers import SortedList
+
+
+def _negate(price: Decimal) -> Decimal:
+    # Named at module level (not a lambda) specifically so it's picklable - a
+    # SortedList's key function gets pickled along with it as part of the periodic
+    # snapshot, and pickle can't serialize a lambda (no stable module-level reference).
+    return -price
+
 
 class OrderBook:
     """
     Maintain price levels for bids and asks.
-    bids_prices: list of Decimal prices sorted DESC (best bid first)
-    asks_prices: list of Decimal prices sorted ASC (best ask first)
+    bids_prices: SortedList of Decimal prices, DESC (best bid first)
+    asks_prices: SortedList of Decimal prices, ASC (best ask first)
     price_map: price -> deque[Order] for FIFO at that price
+
+    bids_prices/asks_prices use sortedcontainers.SortedList (O(log n) insert/remove
+    via bisection over sqrt(n)-sized sublists) instead of a plain list, since a plain
+    list's insert/remove are O(n) - they shift every element past the mutation point.
+    Both still behave like an ordinary sequence (indexing, slicing, iteration, len),
+    so best_bid()/best_ask()/top_n() below are unchanged.
     """
 
     def __init__(self, symbol: str):
@@ -18,8 +32,8 @@ class OrderBook:
         self.bids_map: Dict[Decimal, Deque[Order]] = {}
         self.asks_map: Dict[Decimal, Deque[Order]] = {}
         # sorted price lists for efficient best price lookups
-        self.bids_prices: List[Decimal] = []  # descending
-        self.asks_prices: List[Decimal] = []  # ascending
+        self.bids_prices = SortedList(key=_negate)  # descending
+        self.asks_prices = SortedList()  # ascending
         # inside OrderBook.__init__
         self.trigger_orders = []  # list[Order] - orders waiting for trigger
         # order_id -> Order, for O(1) lookup on cancellation
@@ -76,14 +90,10 @@ class OrderBook:
     # helpers for price lists
     # -------------------------
     def _insert_bid_price(self, price: Decimal):
-        # bids_prices is sorted descending
-        idx = bisect.bisect_left([ -p for p in self.bids_prices ], -price)
-        self.bids_prices.insert(idx, price)
+        self.bids_prices.add(price)
 
     def _insert_ask_price(self, price: Decimal):
-        # asks_prices is sorted ascending
-        idx = bisect.bisect_left(self.asks_prices, price)
-        self.asks_prices.insert(idx, price)
+        self.asks_prices.add(price)
 
     def _remove_bid_price(self, price: Decimal):
         try:

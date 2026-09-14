@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Set, Tuple
@@ -13,8 +14,6 @@ from engine.matching_engine import MatchingEngine
 from engine.order import Order, OrderType, OrderSide
 from decimal import Decimal
 
-app = FastAPI(title="Matching Engine API")
-
 # Single in-process matching engine instance. This MUST stay a single process:
 # `engine`, `symbol_locks`, and every OrderBook are plain in-memory Python objects
 # with no shared/external store behind them. Running this with `uvicorn --workers 4`
@@ -22,7 +21,21 @@ app = FastAPI(title="Matching Engine API")
 # copy - an order placed against worker 1 would be invisible to worker 2's book.
 # Scaling this for real would mean either sharding by symbol across processes with a
 # router in front, or moving shared state into Redis/a dedicated matching service.
+# NOTE: this loads any existing snapshot + event log synchronously at import time,
+# before the app/lifespan below even exist.
 engine = MatchingEngine()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Periodic snapshot (see engine/persistence.py) - without this, live trading
+    # still gets logged to the event log (crash-safe either way), but the log would
+    # never be truncated and startup would always replay it from the very beginning.
+    await engine.start_persistence_task()
+    yield
+    # Best-effort final checkpoint on a clean shutdown.
+    engine.save_state_now()
+
+app = FastAPI(title="Matching Engine API", lifespan=lifespan)
 
 # per-symbol asyncio.Lock to ensure serial processing per symbol
 symbol_locks: Dict[str, asyncio.Lock] = {}
