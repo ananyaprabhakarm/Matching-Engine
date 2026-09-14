@@ -1,9 +1,10 @@
+from datetime import datetime
 from decimal import Decimal, getcontext
 from engine.order_book import OrderBook
 from engine.order import Order, OrderType, OrderSide
 from engine.trade import Trade
 from typing import Dict, List, Optional, Tuple
-from engine.persistence import load_snapshot, save_snapshot
+from engine.persistence import load_snapshot, save_snapshot, append_event, read_events, truncate_event_log
 from utils.config import MAKER_FEE_RATE, TAKER_FEE_RATE
 import asyncio
 
@@ -21,14 +22,31 @@ class MatchingEngine:
         self.order_books = {}
         # store trades for audit
         self.trades: List[Trade] = []
-        data = load_snapshot()
-        if data:
-            self.order_books, self.trades = data.get("order_books", {}), data.get("trades", [])
-        self._persist_interval = persist_interval_seconds
-        self._persist_task = None
         # order_id -> symbol. Lets a bare order_id (all DELETE /order/{id} has)
         # be routed to the right OrderBook without scanning every symbol.
         self.order_symbol_index: Dict[str, str] = {}
+        # True only while replaying the event log on startup - suppresses re-logging
+        # events that are already in the log being replayed.
+        self._replaying = False
+
+        data = load_snapshot()
+        if data:
+            self.order_books = data.get("order_books", {})
+            self.trades = data.get("trades", [])
+            self.order_symbol_index = data.get("order_symbol_index", {})
+        # Replay whatever's happened since that snapshot was taken (or, if there's
+        # no snapshot at all yet, the whole log) - see engine/persistence.py.
+        self._replay_event_log()
+
+        self._persist_interval = persist_interval_seconds
+        self._persist_task = None
+
+    def _snapshot_state(self) -> dict:
+        return {
+            "order_books": self.order_books,
+            "trades": self.trades,
+            "order_symbol_index": self.order_symbol_index,
+        }
 
     async def start_persistence_task(self):
         if self._persist_task:
@@ -39,13 +57,75 @@ class MatchingEngine:
         while True:
             await asyncio.sleep(self._persist_interval)
             try:
-                save_snapshot({"order_books": self.order_books, "trades": self.trades})
+                save_snapshot(self._snapshot_state())
+                # The snapshot just captured everything the log holds - the log's
+                # job was only to cover the gap since the *previous* snapshot.
+                truncate_event_log()
             except Exception:
                 # don't crash engine
                 pass
 
     def save_state_now(self):
-        save_snapshot({"order_books": self.order_books, "trades": self.trades})
+        save_snapshot(self._snapshot_state())
+        truncate_event_log()
+
+    # ---------------------------
+    # event log: write path (live) and replay path (startup)
+    # ---------------------------
+    def _log_event(self, event_type: str, payload: dict):
+        if self._replaying:
+            return
+        try:
+            append_event({"type": event_type, "ts": datetime.utcnow().isoformat() + "Z", **payload})
+        except Exception:
+            # audit trail is best-effort - never let a logging failure break trading
+            pass
+
+    @staticmethod
+    def _order_event_payload(order: Order) -> dict:
+        return {
+            "id": order.id,
+            "symbol": order.symbol,
+            "order_type": order.order_type.value,
+            "side": order.side.value,
+            "quantity": str(order.quantity),
+            "trader_id": order.trader_id,
+            "price": str(order.price) if order.price is not None else None,
+            "stop_price": str(order.stop_price) if order.stop_price is not None else None,
+            "timestamp": order.timestamp.isoformat(),
+        }
+
+    @staticmethod
+    def _order_from_event(data: dict) -> Order:
+        return Order(
+            symbol=data["symbol"],
+            order_type=OrderType(data["order_type"]),
+            side=OrderSide(data["side"]),
+            quantity=Decimal(data["quantity"]),
+            trader_id=data["trader_id"],
+            price=Decimal(data["price"]) if data.get("price") is not None else None,
+            stop_price=Decimal(data["stop_price"]) if data.get("stop_price") is not None else None,
+            id=data["id"],
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+        )
+
+    def _replay_event_log(self):
+        events = read_events()
+        if not events:
+            return
+        self._replaying = True
+        try:
+            for event in events:
+                etype = event.get("type")
+                if etype == "order":
+                    self.process_order(self._order_from_event(event["order"]))
+                elif etype == "cancel":
+                    self.cancel_order(event["order_id"], event["trader_id"])
+                # "trade" events are a derived side-effect of the "order" event that
+                # produced them, not a separate input - replaying the order already
+                # reproduces the trade, so there's nothing to replay here.
+        finally:
+            self._replaying = False
 
     def get_book(self, symbol: str) -> OrderBook:
         if symbol not in self.order_books:
@@ -68,6 +148,7 @@ class MatchingEngine:
           - STOP / STOP_LIMIT / TAKE_PROFIT rest as pending triggers instead of matching
         """
         book = self.get_book(order.symbol)
+        self._log_event("order", {"order": self._order_event_payload(order)})
 
         if order.order_type in TRIGGER_ORDER_TYPES:
             book.add_trigger_order(order)
@@ -162,6 +243,7 @@ class MatchingEngine:
 
                 trades.append(trade)
                 self.trades.append(trade)
+                self._log_event("trade", {"trade": trade.to_dict()})
 
                 # update fills
                 resting_order.filled += exec_qty
@@ -230,6 +312,7 @@ class MatchingEngine:
         result = book.cancel_order(order_id, trader_id)
         if result == "ok":
             self.order_symbol_index.pop(order_id, None)
+            self._log_event("cancel", {"order_id": order_id, "trader_id": trader_id})
         return result
 
     def get_open_orders(self, trader_id: str, symbol: Optional[str] = None) -> List[Order]:

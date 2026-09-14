@@ -2,18 +2,21 @@ import pytest
 from decimal import Decimal
 from engine.matching_engine import MatchingEngine
 from engine.order import Order, OrderType, OrderSide
-from engine.persistence import SNAPSHOT_FILE
+from engine.persistence import SNAPSHOT_FILE, EVENT_LOG_FILE
 
 
 @pytest.fixture(autouse=True)
 def clean_snapshot():
-    # MatchingEngine() loads any existing snapshot on init - make sure tests never
-    # pick up state left behind by a previous run or a manually-started server.
-    if SNAPSHOT_FILE.exists():
-        SNAPSHOT_FILE.unlink()
+    # MatchingEngine() loads any existing snapshot AND replays any existing event
+    # log on init - make sure tests never pick up state left behind by a previous
+    # run, a manually-started server, or a previous test in this same session.
+    for f in (SNAPSHOT_FILE, EVENT_LOG_FILE):
+        if f.exists():
+            f.unlink()
     yield
-    if SNAPSHOT_FILE.exists():
-        SNAPSHOT_FILE.unlink()
+    for f in (SNAPSHOT_FILE, EVENT_LOG_FILE):
+        if f.exists():
+            f.unlink()
 
 
 @pytest.fixture
