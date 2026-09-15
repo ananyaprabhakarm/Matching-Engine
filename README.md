@@ -1,132 +1,66 @@
-# ⚡ Cryptocurrency Matching Engine
+# Matching Engine
 
-A **simple and efficient cryptocurrency matching engine** built with **FastAPI** and **WebSockets**, supporting multiple order types (LIMIT, MARKET, IOC, FOK) and a **maker-taker fee model**.  
+A crypto matching engine built with FastAPI and WebSockets: price-time priority order matching, a maker-taker fee model, self-trade prevention, stop/take-profit orders, and a live trading dashboard — all backed by a real (if intentionally single-process) engine, not a mock.
 
-This project demonstrates how a basic exchange engine works — matching buy/sell orders based on price-time priority and returning real-time trade execution reports.
+## Features
 
----
+- **Order types**: LIMIT, MARKET, IOC (Immediate-or-Cancel), FOK (Fill-or-Kill), STOP, STOP_LIMIT, TAKE_PROFIT
+- **Price-time priority matching**: best price first, FIFO within a price level
+- **Maker-taker fees**: maker 0.1%, taker 0.2% (`utils/config.py`)
+- **Trader identity**: every order carries a `trader_id` — a plain client-supplied string, not a login system, but enough to support cancellation and self-trade prevention
+- **Order cancellation**: cancel your own resting orders; other traders' orders can't be discovered or cancelled through the API
+- **Self-trade prevention**: an order never matches against its own trader's resting orders — it skips them (preserving their place in the queue) and matches everyone else at that price level instead
+- **Stop orders**: STOP / STOP_LIMIT / TAKE_PROFIT rest as pending triggers and activate automatically when a trade crosses their trigger price, including cascading triggers
+- **Live dashboard**: a single-page UI served by the API itself — order entry, live order book, BBO, trade tape, and your own open orders with cancel buttons
+- **Durable persistence**: every order/trade/cancel is appended to a human-readable event log, replayed on startup on top of a periodic snapshot — see [Persistence](#persistence) below
 
-## 🚀 Features
-
-- **Order Types Supported:**
-  - LIMIT (rest on book if not fully matched)
-  - MARKET (match immediately or cancel)
-  - IOC (Immediate or Cancel)
-  - FOK (Fill or Kill)
-  - STOP / STOP_LIMIT / TAKE_PROFIT (rest as pending triggers, activate on a crossing trade)
-- **Symbols:** Supports multiple trading pairs (e.g., BTC-USDT)
-- **Trader Identity:** Every order carries a `trader_id` (a plain client-supplied string, not a login system) - enough to support cancellation and self-trade prevention
-- **Order Cancellation:** Cancel your own resting orders; other traders' orders can't be discovered or cancelled
-- **Self-Trade Prevention:** An order never matches against its own trader's resting orders - it skips them and matches everyone else at that price level instead
-- **Maker-Taker Fee Model:**  
-  - Maker: 0.1%  
-  - Taker: 0.2%
-- **Real-Time Matching:** Uses price-time priority (FIFO)
-- **WebSocket Trade Feed:** Sends executed trades instantly
-- **Lightweight Design:** Focused on clarity and speed
-
----
-
-## 🧠 System Architecture
-
-### Components Overview
-
-| Component | Description |
-|------------|--------------|
-| **Matching Engine** | Core logic that matches buy and sell orders |
-| **Order Book** | Stores bids and asks with efficient lookup |
-| **API Layer (FastAPI)** | Handles order submission and WebSocket connections |
-| **Fee Engine** | Calculates maker and taker fees |
-| **Trade Reporter** | Returns trade details including fees and best bid/ask snapshot |
-
----
-
-### Basic Architecture Diagram
-```
- ┌──────────────────────────────┐
- │          Clients             │
- │ (Traders / Bots / Systems)   │
- └──────────────┬───────────────┘
-                │
-         HTTP / WebSocket
-                │
-    ┌───────────┴───────────┐
-    │       FastAPI App     │
-    │  - /order endpoint    │
-    │  - /ws/trades feed    │
-    └───────────┬───────────┘
-                │
-       ┌────────┴────────┐
-       │ Matching Engine │
-       │  - Order Book   │
-       │  - Fee System   │
-       │  - Trade Logic  │
-       └─────────────────┘
+## Architecture
 
 ```
-## 🧩 Data Structures
-
-| Structure | Purpose |
-|------------|----------|
-| **`deque` (FIFO)** | To store orders at each price level |
-| **`list` of prices** | To track sorted price levels for matching |
-| **`dict` of orders** | To quickly access orders by ID |
-| **`Trade` list** | To store all executed trades for reporting |
-
-**Order matching priority:**
-- Highest bid matches lowest ask first.
-- Within a price, earlier (older) orders have priority (FIFO).
-
----
-
-## ⚙️ Matching Algorithm
-
-**Steps:**
-
-1. A new order arrives (buy or sell).  
-2. It’s matched against opposite orders in the book based on price and time priority.  
-3. Trades are executed at the **maker’s price**.  
-4. Fees are calculated and included in the trade report.  
-5. If the order isn’t fully filled:
-   - LIMIT → rests in book  
-   - MARKET/IOC → remainder canceled  
-   - FOK → only executes if full quantity is available  
-
-**Example Trade Report:**
-
-```json
-{
-  "symbol": "BTC-USDT",
-  "price": 65000,
-  "quantity": 0.5,
-  "maker_order_id": "c18c...",
-  "taker_order_id": "b92f...",
-  "aggressor_side": "buy",
-  "fees": {
-    "maker_fee": 32.5,
-    "taker_fee": 65.0,
-    "maker_fee_rate": 0.001,
-    "taker_fee_rate": 0.002
-  }
-}
+ Clients (traders / bots)
+        │
+   HTTP + WebSocket
+        │
+   FastAPI app (api/server.py)
+    - POST /order, DELETE /order/{id}
+    - GET /orderbook/{symbol}, GET /orders/{trader_id}
+    - WS /ws  (bbo / book / trades feeds)
+    - GET /   (dashboard, served from web/)
+        │
+   MatchingEngine (engine/matching_engine.py)
+    - one OrderBook per symbol (engine/order_book.py)
+    - fee calculation, trade construction (engine/trade.py)
+    - event log + snapshot persistence (engine/persistence.py)
 ```
-## 💸 Maker-Taker Fee Model
 
-### Defined in config.py:
-MAKER_FEE_RATE = 0.001  # 0.1%
-TAKER_FEE_RATE = 0.002  # 0.2%
+**Per-symbol data structures** (`engine/order_book.py`):
+- `bids_map` / `asks_map`: `price -> deque[Order]`, FIFO within a price level
+- `bids_prices` / `asks_prices`: `sortedcontainers.SortedList` of active price levels (O(log n) insert/remove), descending for bids, ascending for asks
+- `orders_by_id`: `order_id -> Order`, for O(1) cancellation lookup
+- `trigger_orders`: pending STOP/STOP_LIMIT/TAKE_PROFIT orders, evaluated against each trade's price
 
-Maker: Adds liquidity (resting order).
-Taker: Removes liquidity (immediate match).
+## Running it
 
-Both fees are automatically included in each trade execution report.
+```bash
+git clone <this repo>
+cd Matching-Engine
 
-## 🌐 API Endpoints
-### 1. Submit Order
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-POST /order
+# single worker only - see "Scaling" below for why
+uvicorn api.server:app --host 127.0.0.1 --port 8000
+```
 
-Request Example:
+Then open:
+- `http://127.0.0.1:8000/` — the live trading dashboard
+- `http://127.0.0.1:8000/docs` — interactive API docs (Swagger UI)
+
+## API
+
+### `POST /order`
+
 ```json
 {
   "symbol": "BTC-USDT",
@@ -137,142 +71,78 @@ Request Example:
   "trader_id": "alice"
 }
 ```
-For `stop` / `stop_limit` / `take_profit`, also include `stop_price` (the trigger price); `stop_limit` additionally needs `price` (the limit price it converts to once triggered).
+`price` is required for `limit`/`ioc`/`fok`/`stop_limit`. `stop_price` is required for `stop`/`stop_limit`/`take_profit`, and `stop_limit` additionally needs `price` (the limit price it converts to once triggered).
 
-Response Example:
 ```json
 {
   "status": "accepted",
   "order_id": "6491a6cf-c1d8-4044-9da2-ef673bd9cae0",
   "trades": [],
-  "bbo": {
-    "bid": "65000",
-    "ask": null
-  },
+  "bbo": { "bid": "65000", "ask": null },
   "self_trade_prevented": false
 }
 ```
 
-### 2. Cancel Order
+### `DELETE /order/{order_id}?trader_id=alice`
 
-DELETE /order/{order_id}?trader_id=alice
+Cancels a resting order. Returns `404` if the order doesn't exist *or* belongs to a different trader (deliberately not distinguished, so you can't probe for other traders' order IDs), and `400` if it's already fully filled.
 
-Cancels a resting order. Returns 404 if the order doesn't exist *or* belongs to a different trader (the two aren't distinguished, so you can't probe for other traders' order IDs), and 400 if the order is already fully filled.
+### `GET /orderbook/{symbol}`
 
-### 3. Order Book Snapshot
+Top-10 bids/asks + BBO, same shape as the WebSocket `l2_update` payload — for a client that just wants one read without holding a socket open.
 
-GET /orderbook/{symbol}
+### `GET /orders/{trader_id}`
 
-Same shape as the WebSocket `l2_update` payload (top 10 bids/asks + BBO), for clients that don't want to hold a socket open just to check the book once.
+That trader's currently-resting orders (what the dashboard's "My Open Orders" panel polls).
 
-### 4. A Trader's Open Orders
+### `GET /health`
 
-GET /orders/{trader_id}
+Trivial liveness check.
 
-Lists that trader's currently-resting orders (used by the dashboard to show cancel buttons next to your own open orders).
+### `WS /ws`
 
-### 5. WebSocket Trade Feed
-
-Endpoint: ws://127.0.0.1:8000/ws/trades
-
-Clients receive updates on every executed trade in real time.
-
-Example message:
+Subscribe/unsubscribe to live feeds per symbol:
 ```json
-{
-  "symbol": "BTC-USDT",
-  "price": 65000,
-  "quantity": 0.5,
-  "aggressor_side": "buy",
-  "fees": {
-    "maker_fee": 32.5,
-    "taker_fee": 65.0
-  }
-}
+{"action": "subscribe", "feed": "bbo", "symbol": "BTC-USDT"}
 ```
-## 🧰 Tech Stack
-
-Python 3.10+
-
-FastAPI (for REST + WebSocket APIs)
-
-Uvicorn (ASGI server)
-
-Collections / Decimal / UUID (for precise order handling)
-
-## 🧱 Running the Project
+`feed` is one of `bbo`, `book`, `trades`. On subscribe you immediately get a snapshot, then live updates as they happen:
+```json
+{"type": "bbo", "data": {"symbol": "BTC-USDT", "bid": "65000", "ask": null}}
+{"type": "l2_update", "data": {"symbol": "BTC-USDT", "bids": [...], "asks": [...]}}
+{"type": "trade", "data": {"symbol": "BTC-USDT", "price": "65000", "quantity": "0.5", "maker_trader_id": "bob", "taker_trader_id": "alice", ...}}
 ```
-# Clone repo
-git clone https://github.com/yourusername/matching-engine.git
-cd matching-engine
 
-# Create Virual Enviornment
-python -m venv .venv
-source .venv/bin/activate
+## Persistence
 
-# Install dependencies
-pip install -r requirements.txt
+Two layers, working together:
 
-# Run the server (single worker only - see "Scaling this" below)
-uvicorn api.server:app --host 127.0.0.1 --port 8000
+1. **Event log** (`data/events.jsonl`) — every accepted order, executed trade, and cancellation is appended as one JSON line the moment it happens. Human-readable, append-only, genuinely crash-safe.
+2. **Periodic snapshot** (`data/order_books_snapshot.pkl`) — the full in-memory state, pickled every few seconds as a fast-recovery checkpoint. Taking one truncates the event log, since everything in it up to that point is now captured in the snapshot.
+
+On startup: load the last snapshot (if any), then replay the event log on top of it. Replay only ever needs to cover the gap since the last snapshot, not the full history — standard snapshot + replay-the-tail.
+
+## Scaling
+
+This is intentionally a **single process**: `MatchingEngine` and every `OrderBook` are plain in-memory Python objects with no external shared store. That's why the run command above doesn't use `--workers` — each `uvicorn` worker would be a separate process with its own private copy of the engine, so an order placed against worker 1 would be invisible to worker 2's book. That's a correctness bug, not a performance tradeoff.
+
+Within that one process, real concurrency is still handled well: FastAPI/`asyncio` serve many connections concurrently, and a per-symbol `asyncio.Lock` serializes only orders for the *same* symbol — BTC-USDT and ETH-USDT orders never block each other.
+
+To scale beyond one process for real: shard by symbol across multiple processes with a router in front, or move the shared state out of process entirely (Redis, or a dedicated matching microservice). Both are legitimate next steps — neither is "just add `--workers`."
+
+## Testing
+
+```bash
+pytest tests/ -v
 ```
-Then open:
-➡️ http://127.0.0.1:8000/ for the live trading dashboard (order entry, live order book, BBO, trade tape)
-➡️ http://127.0.0.1:8000/docs to view API documentation.
 
-## 🖥️ Live Dashboard
+20 tests across `tests/test_matching_engine.py` (every order type, fees, FIFO, cancellation, self-trade prevention, stop-order triggering) and `tests/test_persistence.py` (crash recovery via log replay and via snapshot, append-only log format, snapshot-triggered truncation).
 
-A single-page dashboard is served directly by the API at `/` (see [web/](web/)) — no separate frontend build or server needed. It connects to `/order` and `/ws` in real time so you can place orders and watch the book, BBO, and trade tape update live, straight from the actual matching engine.
+## Known limitations / next steps
 
-## 🧪 Testing with Postman
+- `trader_id` is a plain client-supplied string, not real authentication — fine for a demo, not for production.
+- No order modification (cancel + resubmit works, but there's no in-place amend).
+- No sharding/Redis backend yet — see [Scaling](#scaling).
 
-POST request to /order for creating buy/sell orders.
+## Tech stack
 
-WebSocket connect to ws://127.0.0.1:8000/ws/trades to see trade feed live.
-
-Example curl command:
-```
-curl -X POST http://127.0.0.1:8000/order \
-  -H "Content-Type: application/json" \
-  -d '{"symbol": "BTC-USDT", "order_type": "limit", "side": "buy", "quantity": "1", "price": "65000"}'
-```
-## 📈 Future Improvements
-
-Add persistent storage as an append-only event log (current pickle-snapshot persistence exists but isn't wired into the server lifecycle yet)
-
-Add order modification support (cancellation already exists)
-
-Add proper logging and audit trails
-
-Add performance benchmarking
-
-Swap the price-level `list` + `bisect` structure for something with better insert/remove complexity at scale (e.g. `sortedcontainers.SortedList`) - the current approach is correct, just not optimal under heavy order-book churn
-
-Real authentication (today `trader_id` is just a client-supplied string, not a login system - fine for a demo, not for production)
-
-## ⚖️ Scaling This
-
-This engine is intentionally a **single process** right now: `MatchingEngine` and every `OrderBook` are plain in-memory Python objects with no external shared store behind them. That's why the run command above does *not* use `--workers`  - each `uvicorn` worker is a separate process with its own private copy of the engine, so an order placed against worker 1 would be completely invisible to worker 2's order book. That's a correctness bug, not a performance tradeoff.
-
-Within a single process, this already handles real concurrency well: FastAPI/`asyncio` serve many connections concurrently, and a per-symbol `asyncio.Lock` serializes only the orders for the *same* symbol, so BTC-USDT and ETH-USDT orders never block each other.
-
-To actually scale beyond one process, the real options are:
-- **Shard by symbol** across multiple processes, with a lightweight router in front that sends each symbol's orders to its own dedicated process.
-- **Move the shared state out of process** entirely (e.g. into Redis or a dedicated matching microservice) so multiple API workers can all submit to the same source of truth.
-
-Either is a legitimate next step - just not something you get for free by adding `--workers`.
-
-## 🧪 Performance Note
-
-Currently, the system is in-memory and single-process — you can expect hundreds of orders/sec easily within that one process.
-Performance can be scaled further by:
-
-Using async APIs for bulk order ingestion
-
-Sharding by symbol or moving shared state to Redis (see "Scaling This" above) - not by adding uvicorn workers, which breaks correctness for this architecture
-
-Optimizing data structures (e.g., heaps or SortedDicts)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
+Python 3.9+, FastAPI, Uvicorn, `websockets`, `sortedcontainers`, `Decimal` throughout for exact price/quantity arithmetic.
